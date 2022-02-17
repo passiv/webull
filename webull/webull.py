@@ -394,6 +394,19 @@ class webull:
             raise ValueError('Stock symbol is required')
         return ticker_id
 
+    def search(self, stock=''):
+        '''
+        Lookup ticker_id
+        Ticker issue, will attempt to find an exact match, if none is found, match the first one
+        '''
+        headers = self.build_req_headers()
+        ticker_id = 0
+        if stock and isinstance(stock, str):
+            response = requests.get(self._urls.stock_id(stock, self._region_code), headers=headers, timeout=self.timeout)
+            return response.json()
+        else:
+            raise ValueError('Stock symbol is required')
+
     '''
     Actions related to stock
     '''
