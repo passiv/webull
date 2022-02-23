@@ -9,7 +9,8 @@ import requests
 import time
 import uuid
 import urllib.parse
-
+import pytz
+import dateutil.parser
 from datetime import datetime, timedelta
 from email_validator import validate_email, EmailNotValidError
 from pandas import DataFrame, to_datetime
@@ -88,8 +89,41 @@ class webull:
             headers['lzone'] = self.zone_var
         return headers
 
+    def not_empty(self, string):
+        return string and string != ''
 
-    def login(self, username='', password='', device_name='', mfa='', question_id='', question_answer='', save_token=False, token_path=None):
+    def is_expired(self, expiry):
+        now = datetime.now()
+        now = pytz.timezone("UTC").localize(now)
+        return dateutil.parser.parse(expiry) < now
+
+    def api_login(self, access_token='', refresh_token='', token_expiry='', uuid=''):
+        self._access_token = access_token
+        self._refresh_token = refresh_token
+        self._token_expire = token_expiry
+        self._uuid = uuid
+        self._account_id = self.get_account_id()
+
+        return {'accessToken': access_token, 'tokenExpireTime': token_expiry, 'refreshToken': refresh_token, 'uuid': uuid}
+
+    def refresh_login(self, refresh_token):
+        '''
+        Refresh login token
+        '''
+        headers = self.build_req_headers()
+        data = {'refreshToken': refresh_token}
+
+        response = requests.post(self._urls.refresh_login() + refresh_token, json=data, headers=headers, timeout=self.timeout)
+        result = response.json()
+        if 'accessToken' in result and result['accessToken'] != '' and result['refreshToken'] != '' and result['tokenExpireTime'] != '':
+            self._access_token = result['accessToken']
+            self._refresh_token = result['refreshToken']
+            self._token_expire = result['tokenExpireTime']
+            if save_token:
+                result['uuid'] = self._uuid
+        return result
+
+    def login(self, username='', password='', device_name='', mfa='', question_id='', question_answer='', access_token='', refresh_token='', token_expiry='', uuid=''):
         '''
         Login with email or phone number
 
@@ -97,6 +131,13 @@ class webull:
         US '+1-XXXXXXX'
         CH '+86-XXXXXXXXXXX'
         '''
+        if self.not_empty(access_token) and self.not_empty(refresh_token) and self.not_empty(token_expiry):
+            if self.is_expired(token_expiry):
+                result = self.refresh_login(refresh_token)
+                access_token = result['accessToken']
+                refresh_token = result['refreshToken']
+                token_expiry = result['tokenExpireTime']
+            return self.api_login(access_token, refresh_token, token_expiry, uuid)
 
         if not username or not password:
             raise ValueError('username or password is empty')
@@ -140,8 +181,6 @@ class webull:
             self._token_expire = result['tokenExpireTime']
             self._uuid = result['uuid']
             self._account_id = self.get_account_id()
-            if save_token:
-                self._save_token(result, token_path)
         return result
 
     def get_mfa(self, username='') :
@@ -231,31 +270,6 @@ class webull:
         headers = self.build_req_headers()
         response = requests.get(self._urls.logout(), headers=headers, timeout=self.timeout)
         return response.status_code
-
-    def api_login(self, access_token='', refresh_token='', token_expire='', uuid='', mfa=''):
-        self._access_token = access_token
-        self._refresh_token = refresh_token
-        self._token_expire = token_expire
-        self._uuid = uuid
-        self._account_id = self.get_account_id()
-
-    def refresh_login(self, save_token=False, token_path=None):
-        '''
-        Refresh login token
-        '''
-        headers = self.build_req_headers()
-        data = {'refreshToken': self._refresh_token}
-
-        response = requests.post(self._urls.refresh_login() + self._refresh_token, json=data, headers=headers, timeout=self.timeout)
-        result = response.json()
-        if 'accessToken' in result and result['accessToken'] != '' and result['refreshToken'] != '' and result['tokenExpireTime'] != '':
-            self._access_token = result['accessToken']
-            self._refresh_token = result['refreshToken']
-            self._token_expire = result['tokenExpireTime']
-            if save_token:
-                result['uuid'] = self._uuid
-                self._save_token(result, token_path)
-        return result
 
     def _save_token(self, token=None, path=None):
         '''
@@ -375,6 +389,7 @@ class webull:
         '''
         headers = self.build_req_headers()
         ticker_id = 0
+        item_to_return = None
         if stock and isinstance(stock, str):
             response = requests.get(self._urls.stock_id(stock, self._region_code), headers=headers, timeout=self.timeout)
             result = response.json()
@@ -382,9 +397,11 @@ class webull:
                 for item in result['data'] : # implies multiple tickers, but only assigns last one?
                     if 'symbol' in item and item['symbol'] == stock :
                         ticker_id = item['tickerId']
+                        item_to_return = item
                         break
                     elif 'disSymbol' in item and item['disSymbol'] == stock :
                         ticker_id = item['tickerId']
+                        item_to_return = item
                         break
                 if ticker_id == 0 :
                     ticker_id = result['data'][0]['tickerId']
@@ -392,7 +409,7 @@ class webull:
                 raise ValueError('TickerId could not be found for stock {}'.format(stock))
         else:
             raise ValueError('Stock symbol is required')
-        return ticker_id
+        return item_to_return if item_to_return else ticker_id
 
     def search(self, stock=''):
         '''
