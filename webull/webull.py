@@ -397,7 +397,6 @@ class webull:
         '''
         headers = self.build_req_headers()
         ticker_id = 0
-        item_to_return = None
         if stock and isinstance(stock, str):
             response = requests.get(self._urls.stock_id(stock, self._region_code), headers=headers, timeout=self.timeout)
             result = response.json()
@@ -405,11 +404,9 @@ class webull:
                 for item in result['data'] : # implies multiple tickers, but only assigns last one?
                     if 'symbol' in item and item['symbol'] == stock :
                         ticker_id = item['tickerId']
-                        item_to_return = item
                         break
                     elif 'disSymbol' in item and item['disSymbol'] == stock :
                         ticker_id = item['tickerId']
-                        item_to_return = item
                         break
                 if ticker_id == 0 :
                     ticker_id = result['data'][0]['tickerId']
@@ -417,7 +414,7 @@ class webull:
                 raise ValueError('TickerId could not be found for stock {}'.format(stock))
         else:
             raise ValueError('Stock symbol is required')
-        return item_to_return if item_to_return else ticker_id
+        return ticker_id
 
     def search(self, stock=''):
         '''
