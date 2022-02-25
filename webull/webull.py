@@ -175,12 +175,20 @@ class webull:
 
         response = requests.post(self._urls.login(), json=data, headers=headers, timeout=self.timeout)
         result = response.json()
-        if 'accessToken' in result :
+        if 'accessToken' in result:
             self._access_token = result['accessToken']
             self._refresh_token = result['refreshToken']
             self._token_expire = result['tokenExpireTime']
             self._uuid = result['uuid']
             self._account_id = self.get_account_id()
+
+        try:
+            result_message = result['msg']
+            if result_message and 'Incorrect password or username' in result_message:
+                return "INVALID_CREDENTIALS"
+        except Exception as ex:
+            pass
+
         return result
 
     def get_mfa(self, username='') :
