@@ -21,7 +21,8 @@ from . import endpoints
 
 class webull:
 
-    def __init__(self):
+    def __init__(self, brokerage_auth_id: str):
+        self._did = brokerage_auth_id
         self._session = requests.session()
         self._headers = {
             'Accept': '*/*',
@@ -47,32 +48,12 @@ class webull:
         self._uuid = ''
 
         #miscellaenous
-        self._did = self._get_did()
         self._region_code = 6
         self.zone_var = 'dc_core_r001'
         self.timeout = 15
 
     def _get_did(self, path=''):
-        '''
-        Makes a unique device id from a random uuid (uuid.uuid4).
-        if the pickle file doesn't exist, this func will generate a random 32 character hex string
-        uuid and save it in a pickle file for future use. if the file already exists it will
-        load the pickle file to reuse the did. Having a unique did appears to be very important
-        for the MQTT web socket protocol
-
-        path: path to did.bin. For example _get_did('cache') will search for cache/did.bin instead.
-
-        :return: hex string of a 32 digit uuid
-        '''
-        filename = 'did.bin'
-        if path:
-            filename = os.path.join(path, filename)
-        if os.path.exists(filename):
-            did = pickle.load(open(filename,'rb'))
-        else:
-            did = uuid.uuid4().hex
-            pickle.dump(did, open(filename, 'wb'))
-        return did
+        return self._did
 
     def build_req_headers(self, include_trade_token=False, include_time=False, include_zone_var=True):
         '''
@@ -123,7 +104,7 @@ class webull:
                 result['uuid'] = self._uuid
         return result
 
-    def login(self, username='', password='', device_name='', mfa='', question_id='', question_answer='', access_token='', refresh_token='', token_expiry='', uuid=''):
+    def login(self, username='', password='', device_name='Passiv/Snaptrade', mfa='', question_id='', question_answer='', access_token='', refresh_token='', token_expiry='', uuid=''):
         '''
         Login with email or phone number
 
@@ -149,7 +130,7 @@ class webull:
         account_type = self.get_account_type(username)
 
         if device_name == '' :
-            device_name = 'default_string'
+            device_name = 'Passiv/Snaptrade'
 
         data = {
             'account': username,
@@ -181,6 +162,11 @@ class webull:
             self._token_expire = result['tokenExpireTime']
             self._uuid = result['uuid']
             self._account_id = self.get_account_id()
+
+        if 'extInfo' in result and 'accessToken' not in result:
+            self.get_mfa(username=username)
+            sec = self.get_security(username)
+            return {'MFA_REQUIRED': self._did, 'SECURITY_QUESTION': sec[0].get('questionName'), 'SECURITY_QUESTION_ID': sec[0].get('questionId')}
 
         try:
             result_message = result['msg']
