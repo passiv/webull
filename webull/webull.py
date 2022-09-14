@@ -25,15 +25,24 @@ class webull:
         self._did = brokerage_auth_id
         self._session = requests.session()
         self._headers = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:99.0) Gecko/20100101 Firefox/99.0',
             'Accept': '*/*',
             'Accept-Encoding': 'gzip, deflate',
+            'Accept-Language': 'en-US,en;q=0.5',
             'Content-Type': 'application/json',
             'platform': 'web',
+            'hl': 'en',
+            'os': 'web',
+            'osv': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:99.0) Gecko/20100101 Firefox/99.0',
             'app': 'global',
-            'ver': '3.36.12',
-            'User-Agent': '*',
+            'appid': 'webull-webapp',
+            'ver': '3.39.18',
             'lzone': 'dc_core_r001',
-            'did': self._get_did(),
+            'ph': 'MacOS Firefox',
+            'locale': 'eng',
+            # 'reqid': req_id,
+            'device-type': 'Web',
+            'did': self._get_did()
         }
 
         #endpoints
@@ -60,6 +69,8 @@ class webull:
         Build default set of header params
         '''
         headers = self._headers
+        req_id = str(uuid.uuid4().hex)
+        headers['reqid'] = req_id
         headers['did'] = self._did
         headers['access_token'] = self._access_token
         if include_trade_token :
@@ -416,6 +427,27 @@ class webull:
             raise ValueError('Stock symbol is required')
 
     '''
+    Get stock public info
+    '''
+    def get_ticker_info(self, stock=None, tId=None):
+        '''
+        get price quote
+        tId: ticker ID str
+        '''
+        headers = self.build_req_headers()
+        if not stock and not tId:
+            raise ValueError('Must provide a stock symbol or a stock id')
+
+        if stock:
+            try:
+                tId = str(self.get_ticker(stock))
+            except ValueError as _e:
+                raise ValueError("Could not find ticker for stock {}".format(stock))
+        response = requests.get(self._urls.stock_detail(tId), headers=headers, timeout=self.timeout)
+        result = response.json()
+        return result
+
+    '''
     Actions related to stock
     '''
     def get_quote(self, stock=None, tId=None):
@@ -689,8 +721,17 @@ class webull:
         returns a list of options expiration dates
         '''
         headers = self.build_req_headers()
-        data = {'count': count}
-        return requests.get(self._urls.options_exp_date(self.get_ticker(stock)), params=data, headers=headers, timeout=self.timeout).json()['expireDateList']
+        data = {'count': count,
+                'direction': 'all',
+                'tickerId': self.get_ticker(stock)}
+
+        res = requests.post(self._urls.options_exp_dat_new(), json=data, headers=headers, timeout=self.timeout).json()
+        r_data = []
+        for entry in res['expireDateList'] :
+            r_data.append(entry['from'])
+
+        # return requests.get(self._urls.options_exp_date(self.get_ticker(stock)), params=data, headers=headers, timeout=self.timeout).json()['expireDateList']
+        return r_data
 
     def get_options(self, stock=None, count=-1, includeWeekly=1, direction='all', expireDate=None, queryAll=0):
         '''
@@ -698,10 +739,10 @@ class webull:
         params:
             stock: symbol
             count: -1
-            includeWeekly: 0 or 1
-            direction: all, calls, puts
+            includeWeekly: 0 or 1 (deprecated)
+            direction: all, call, put
             expireDate: contract expire date
-            queryAll: 0
+            queryAll: 0 (deprecated)
         '''
         headers = self.build_req_headers()
         # get next closet expiredate if none is provided
@@ -713,16 +754,46 @@ class webull:
                     expireDate = d['date']
                     break
 
-        params = {'count': count,
-                  'includeWeekly': includeWeekly,
-                  'direction': direction,
-                  'expireDate': expireDate,
-                  'unSymbol': stock,
-                  'queryAll': queryAll}
+        data = {'count': count,
+                'direction': direction,
+                'tickerId': self.get_ticker(stock)}
 
-        data = requests.get(self._urls.options(self.get_ticker(stock)), params=params, headers=headers, timeout=self.timeout).json()
+        res = requests.post(self._urls.options_exp_dat_new(), json=data, headers=headers, timeout=self.timeout).json()
+        t_data = []
+        for entry in res['expireDateList'] :
+            if str(entry['from']['date']) == expireDate :
+                t_data = entry['data']
 
-        return data['data']
+        r_data = {}
+        for entry in t_data :
+            if entry['strikePrice'] not in r_data :
+                r_data[entry['strikePrice']] = {}
+            r_data[entry['strikePrice']][entry['direction']] = entry
+
+        r_data = dict(sorted(r_data.items()))
+
+        rr_data = []
+        for s_price in r_data :
+            rr_entry = {'strikePrice': s_price}
+            if 'call' in r_data[s_price] :
+                rr_entry['call'] = r_data[s_price]['call']
+            if 'put' in r_data[s_price] :
+                rr_entry['put'] = r_data[s_price]['put']
+            rr_data.append(rr_entry)
+
+        return rr_data
+
+        #deprecated 22/05/01
+        # params = {'count': count,
+        #           'includeWeekly': includeWeekly,
+        #           'direction': direction,
+        #           'expireDate': expireDate,
+        #           'unSymbol': stock,
+        #           'queryAll': queryAll}
+        #
+        # data = requests.get(self._urls.options(self.get_ticker(stock)), params=params, headers=headers, timeout=self.timeout).json()
+        #
+        # return data['data']
 
     def get_options_by_strike_and_expire_date(self, stock=None, expireDate=None, strike=None, direction='all'):
         '''
@@ -1287,6 +1358,39 @@ class webull:
             return False
         else:
             return True
+
+    def get_press_releases(self, stock=None, tId=None, typeIds=None, num=50):
+        '''
+        gets press releases, useful for getting past earning reports
+        typeIds: None (all) or comma-separated string of the following: '101' (financials) / '104' (insiders)
+        it's possible they add more announcment types in the future, so check the 'announcementTypes'
+        field on the response to verify you have the typeId you want
+        '''
+        if not tId is None:
+            pass
+        elif not stock is None:
+            tId = self.get_ticker(stock)
+        else:
+            raise ValueError('Must provide a stock symbol or a stock id')
+        headers = self.build_req_headers()
+        response = requests.get(self._urls.press_releases(tId, typeIds, num), headers=headers, timeout=self.timeout)
+        result = response.json()
+
+        return result
+
+    def get_calendar_events(self, event, start_date=None, page=1, num=50):
+        '''
+        gets calendar events
+        event: 'earnings' / 'dividend' / 'splits'
+        start_date: in `YYYY-MM-DD` format, today if None
+        '''
+        if start_date is None:
+            start_date = datetime.today().strftime('%Y-%m-%d')
+        headers = self.build_req_headers()
+        response = requests.get(self._urls.calendar_events(event, self._region_code, start_date, page, num), headers=headers, timeout=self.timeout)
+        result = response.json()
+
+        return result
 
 ''' Paper support '''
 class paper_webull(webull):

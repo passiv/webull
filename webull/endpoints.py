@@ -15,6 +15,7 @@ class urls :
         self.base_userfintech_url = 'https://userapi.webullfintech.com/api'
         self.base_new_trade_url = 'https://trade.webullfintech.com/api'
         self.base_ustradebroker_url = 'https://ustrade.webullbroker.com/api'
+        self.base_securitiesfintech_url = 'https://securitiesapi.webullfintech.com/api'
 
     def account(self, account_id):
         return f'{self.base_trade_url}/v3/home/{account_id}'
@@ -128,6 +129,10 @@ class urls :
     def options_exp_date(self, stock):
         return f'{self.base_options_url}/quote/option/{stock}/list'
 
+    #new function 22/05/01
+    def options_exp_dat_new(self):
+        return f'{self.base_fintech_gw_url}/quote/option/strategy/list'
+
     def options_bars(self, derivativeId):
         return f'{self.base_options_gw_url}/quote/option/chart/query?derivativeId={derivativeId}'
 
@@ -179,6 +184,9 @@ class urls :
     def replace_option_orders(self, account_id):
         return f'{self.base_trade_url}/v2/option/replaceOrder/{account_id}'
 
+    def stock_detail(self, stock) :
+        return f'{self.base_fintech_gw_url}/stock/tickerRealTime/getQuote?tickerId={stock}&includeSecu=1&includeQuote=1&more=1'
+
     def stock_id(self, stock, region_code):
         return f'{self.base_options_gw_url}/search/pc/tickers?keyword={stock}&pageIndex=1&pageSize=20&regionId={region_code}'
 
@@ -199,3 +207,12 @@ class urls :
 
     def portfolio_lists(self):
         return f'{self.base_options_gw_url}/personal/portfolio/v2/check'
+
+    def press_releases(self, stock, typeIds=None, num=50):
+        typeIdsString = ''
+        if typeIds is not None:
+            typeIdsString = '&typeIds=' + typeIds
+        return f'{self.base_securitiesfintech_url}/securities/announcement/{stock}/list?lastAnnouncementId=0&limit={num}{typeIdsString}&options=2'
+
+    def calendar_events(self, event, region_code, start_date, page=1, num=50):
+        return f'{self.base_fintech_gw_url}/bgw/explore/calendar/{event}?regionId={region_code}&pageIndex={page}&pageSize={num}&startDate={start_date}'
